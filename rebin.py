@@ -203,6 +203,22 @@ def rebin_spline(x1, y1, x2, interp_kind):
 
 
 def rebin_piecewise_constant(x1, y1, x2):
+    """
+    Rebin histogram values y1 from old bin edges x1 to new edges x2.
+    Input
+    -----
+     * x1 : m+1 array of old bin edges.
+     * y1 : m array of old histogram values. This is the total number in 
+              each bin, not an average.
+     * x2 : n+1 array of new bin edges.
+    Returns
+    -------
+     * y2 : n array of rebinned histogram values.
+    The rebinning algorithm assumes that the counts in each old bin are
+    uniformly distributed in that bin.
+    Bins in x2 that are entirely outside the range of x1 are assigned 0.
+    """
+    
     x1 = np.asarray(x1)
     y1 = np.asarray(y1)
     x2 = np.asarray(x2)
@@ -363,6 +379,67 @@ def rebin2d(x1, y1, z1, x2, y2, interp_kind=3):
 
     return np.array(z2)
 
+def rebin_density_piecewise_constant(x1, y1, x2):
+    '''
+    A modified version of `rebin_piecewise_constant`, which redistributes a density distribution
+    into new bins. In contrast, the original function redistributes counts into new bins. 
+    The main difference is, that for 
+    - counts: the total number must remain constant,
+      .. math:: \sum_{i=1}^{N} n_i = \sum_{j=1}^{M} m_j
+    - density: the total approximated integral must remain constant,
+      .. math:: \sum_{i=1}^{N} \rho_i \Delta x_i = \sum_{j=1}^{M} \tilde{\rho}_j \Delta x_j
+
+    '''
+    x1 = np.asarray(x1)
+    y1 = np.asarray(y1)
+    x2 = np.asarray(x2)
+    dx1 = np.diff(x1)
+    dx2 = np.diff(x2)
+    area1 = y1*dx1
+    
+    # the fractional bin locations of the new bins in the old bins
+    # If the first or the last bin of the new bin set are smaller or larger than the corresponding 
+    # ones of the old bin set, i_place refers only to the first and last old bin locations, i.e. 
+    # it is not extrapolated
+    i_place = np.interp(x2, x1, np.arange(len(x1)))
+
+    cum_area = np.r_[[0], np.cumsum(area1)]
+
+    # calculate bins where lower and upper bin edges span
+    # greater than or equal to one original bin.
+    # This is the contribution from the 'intact' bins (not including the
+    # fractional start and end parts.
+    whole_bins = np.floor(i_place[1:]) - np.ceil(i_place[:-1]) >= 1.
+    
+    start_area = cum_area[np.ceil(i_place[:-1]).astype(int)]
+    finish_area = cum_area[np.floor(i_place[1:]).astype(int)]
+    
+    
+    area2 = np.where(whole_bins, finish_area - start_area, 0.)
+
+    bin_loc = np.clip(np.floor(i_place).astype(int), 0, len(y1) - 1)
+
+    # fractional contribution for bins where the new bin edges are in the same
+    # original bin.
+    floor_right_edges = np.floor(i_place[1:])
+    floor_left_edges = np.floor(i_place[:-1])
+    same_cell = floor_right_edges == floor_left_edges
+    frac = i_place[1:] - i_place[:-1]
+    contrib_area = (frac * area1[bin_loc[:-1]])
+    area2 += np.where(same_cell, contrib_area, 0.)
+
+    # fractional contribution for bins where the left and right bin edges are in
+    # different original bins.
+    different_cell = floor_right_edges > floor_left_edges
+    frac_left = np.ceil(i_place[:-1]) - i_place[:-1]
+    contrib_area = (frac_left * area1[bin_loc[:-1]])
+
+    frac_right = i_place[1:] - np.floor(i_place[1:])
+    contrib_area += (frac_right * area1[bin_loc[1:]])
+
+    area2 += np.where(different_cell, contrib_area, 0.)
+
+    return area2/dx2
 
 
 
